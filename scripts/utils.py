@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import (
@@ -13,6 +14,7 @@ from config import (
     KNOWLEDGE_DIR,
     LOG_FILE,
     QA_DIR,
+    SOURCES_FILE,
     STATE_FILE,
 )
 
@@ -47,6 +49,91 @@ def slugify(text: str) -> str:
     text = re.sub(r"[\s_]+", "-", text)
     text = re.sub(r"-+", "-", text)
     return text.strip("-")
+
+
+# ── Source config ─────────────────────────────────────────────────────
+
+@dataclass
+class SourceGroup:
+    """One entry from sources.yaml."""
+
+    id: str
+    type: str
+    include: list[str]
+    exclude: list[str] = field(default_factory=list)
+    category: str = ""
+    description: str = ""
+
+
+def load_sources_config() -> list[SourceGroup]:
+    """Read and validate sources.yaml. Returns empty list if file missing."""
+    if not SOURCES_FILE.exists():
+        return []
+
+    import yaml
+
+    raw = yaml.safe_load(SOURCES_FILE.read_text(encoding="utf-8"))
+    if not raw or not isinstance(raw, dict):
+        return []
+
+    version = raw.get("version", 1)
+    if version != 1:
+        raise ValueError(f"Unsupported sources.yaml version: {version}")
+
+    groups = []
+    for entry in raw.get("sources", []):
+        if not entry.get("id") or not entry.get("type") or not entry.get("include"):
+            continue
+        groups.append(SourceGroup(
+            id=entry["id"],
+            type=entry["type"],
+            include=entry["include"],
+            exclude=entry.get("exclude", []),
+            category=entry.get("category", ""),
+            description=entry.get("description", ""),
+        ))
+    return groups
+
+
+def resolve_source_files(group: SourceGroup, root: Path | None = None) -> list[Path]:
+    """Expand include globs and subtract exclude globs. Returns sorted unique paths."""
+    from config import ROOT_DIR
+
+    base = root or ROOT_DIR
+    included: set[Path] = set()
+    for pattern in group.include:
+        for match in base.glob(pattern):
+            if match.is_file():
+                included.add(match.resolve())
+
+    excluded: set[Path] = set()
+    for pattern in group.exclude:
+        for match in base.glob(pattern):
+            if match.is_file():
+                excluded.add(match.resolve())
+
+    return sorted(included - excluded)
+
+
+def migrate_state_schema(state: dict) -> dict:
+    """Migrate state.json from old schema (flat 'ingested') to new split schema.
+
+    Old: {"ingested": {"2026-04-09.md": {...}}, ...}
+    New: {"ingested_daily": {"2026-04-09.md": {...}}, "ingested_sources": {}, ...}
+
+    Idempotent: safe to call multiple times.
+    """
+    if "ingested_daily" in state:
+        state.setdefault("ingested_sources", {})
+        return state
+
+    if "ingested" in state:
+        state["ingested_daily"] = state.pop("ingested")
+    else:
+        state["ingested_daily"] = {}
+
+    state.setdefault("ingested_sources", {})
+    return state
 
 
 # ── Wikilink helpers ──────────────────────────────────────────────────
