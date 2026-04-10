@@ -28,9 +28,16 @@ DAILY_DIR = ROOT / "daily"
 INDEX_FILE = KNOWLEDGE_DIR / "index.md"
 WIP_FILE = ROOT / "wip.md"
 
-MAX_CONTEXT_CHARS = 20_000
+MAX_CONTEXT_CHARS = 60_000
 MAX_LOG_LINES = 30
 MAX_WIP_CHARS = 2_000
+# compiled-truth.md lives in the PROJECT root's knowledge/ dir (written by config.py's
+# KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"), which is two levels up from the
+# memory-compiler root. session-start.py's KNOWLEDGE_DIR points to the memory-compiler's
+# own knowledge/ dir, which is a different path.
+PROJECT_KNOWLEDGE_DIR = ROOT.parent.parent / "knowledge"
+COMPILED_TRUTH_FILE = PROJECT_KNOWLEDGE_DIR / "compiled-truth.md"
+MAX_COMPILED_TRUTH_CHARS = 40_000
 
 
 def get_recent_log() -> str:
@@ -61,6 +68,23 @@ def get_wip() -> str | None:
     return content
 
 
+def get_compiled_truth() -> str | None:
+    """Read compiled-truth.md if it exists. Returns None if absent/empty."""
+    if not COMPILED_TRUTH_FILE.exists():
+        return None
+    content = COMPILED_TRUTH_FILE.read_text(encoding="utf-8").strip()
+    if not content:
+        return None
+    if len(content) > MAX_COMPILED_TRUTH_CHARS:
+        # Truncate at the last complete article boundary
+        truncated = content[:MAX_COMPILED_TRUTH_CHARS]
+        last_sep = truncated.rfind("\n---\n")
+        if last_sep > 0:
+            truncated = truncated[:last_sep]
+        content = truncated + "\n\n...(truncated)"
+    return content
+
+
 def build_context() -> str:
     """Assemble the context to inject into the conversation."""
     parts = []
@@ -82,6 +106,11 @@ def build_context() -> str:
         parts.append(f"## Knowledge Base Index\n\n{index_content}")
     else:
         parts.append("## Knowledge Base Index\n\n(empty - no articles compiled yet)")
+
+    # Compiled truth — dense summary of all current knowledge
+    compiled_truth = get_compiled_truth()
+    if compiled_truth:
+        parts.append(f"## Compiled Truth (all current knowledge)\n\n{compiled_truth}")
 
     # Recent daily log
     recent_log = get_recent_log()
