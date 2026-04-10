@@ -33,6 +33,7 @@ from utils import (
     resolve_source_files,
     save_state,
 )
+from compile_truth import compile_truth as regenerate_truth, COMPILED_TRUTH_FILE
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -102,6 +103,10 @@ async def ingest_source_file(
     schema = AGENTS_FILE.read_text(encoding="utf-8")
     wiki_index = read_wiki_index()
 
+    compiled_truth = ""
+    if COMPILED_TRUTH_FILE.exists():
+        compiled_truth = COMPILED_TRUTH_FILE.read_text(encoding="utf-8")
+
     timestamp = now_iso()
     rel_source = f"sources/{group.id}/{file_path.name}"
 
@@ -115,6 +120,10 @@ extract knowledge into structured wiki articles.
 ## Current Wiki Index
 
 {wiki_index}
+
+## Current Knowledge (compiled truth)
+
+{compiled_truth if compiled_truth else "(No compiled truth yet — run compile_truth.py first)"}
 
 ## Source Document to Ingest
 
@@ -138,11 +147,15 @@ architectural patterns.
 1. **Extract key concepts** — Identify 2-5 distinct concepts worth their own article.
    A large design spec may warrant more; a small governance doc may warrant 1-2.
 2. **Create concept articles** in `knowledge/concepts/` — One .md file per concept
-   - Use the exact article format from AGENTS.md (YAML frontmatter + sections)
+   - Use the Truth + Timeline format from AGENTS.md:
+     * `## Truth` section: current facts only, no narrative or provenance
+     * `### Key Points` under Truth: 3-5 self-contained factual bullets
+     * `### Related Concepts` under Truth: [[wikilinks]] with one-line descriptions
+     * `---` horizontal rule separator
+     * `## Timeline` section: per-source entries documenting what was learned and when
    - Include `sources:` in frontmatter pointing to `{rel_source}`
    - Add `source_type: {group.type}` and `source_category: {group.category}` to frontmatter
-   - Use `[[concepts/slug]]` wikilinks to link to related concepts
-   - Write in encyclopedia style — neutral, comprehensive, synthesized
+   - Write Truth in encyclopedia style — dense, factual, no "we discovered"
 3. **Create connection articles** in `knowledge/connections/` if this source reveals
    non-obvious relationships between 2+ existing concepts in the wiki
 4. **Update existing articles** if this source adds new information to concepts already
@@ -276,6 +289,7 @@ def main():
         print(f"  Done.")
 
     articles = list_wiki_articles()
+    regenerate_truth()
     print(f"\nIngestion complete. Total cost: ${total_cost:.2f}")
     print(f"Knowledge base: {len(articles)} articles")
 
