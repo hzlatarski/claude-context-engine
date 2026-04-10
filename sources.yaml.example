@@ -41,3 +41,21 @@ sources:
       - "**/*MEMORY.md"
     category: captured-memory
     description: "Persistent auto-memory from past Claude Code sessions"
+
+  # Drop zone for external material — save files into sources/articles/,
+  # sources/notes/, or sources/pdfs/ then run ingest.py
+  - id: external-articles
+    type: markdown
+    include:
+      - "sources/articles/*.md"
+      - "sources/notes/*.md"
+    category: external
+    description: "External articles, research notes, web clippings"
+
+  # PDF handler (not yet implemented — uncomment when D-scope ships)
+  # - id: external-pdfs
+  #   type: pdf
+  #   include:
+  #     - "sources/pdfs/*.pdf"
+  #   category: research
+  #   description: "Research papers and PDF documents"
