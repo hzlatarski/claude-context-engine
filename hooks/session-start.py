@@ -38,6 +38,8 @@ MAX_WIP_CHARS = 2_000
 PROJECT_KNOWLEDGE_DIR = ROOT.parent.parent / "knowledge"
 COMPILED_TRUTH_FILE = PROJECT_KNOWLEDGE_DIR / "compiled-truth.md"
 MAX_COMPILED_TRUTH_CHARS = 40_000
+STATE_FILE = ROOT / "scripts" / "state.json"
+FLUSH_STATE_FILE = ROOT / "scripts" / "last-flush.json"
 
 
 def get_recent_log() -> str:
@@ -85,6 +87,86 @@ def get_compiled_truth() -> str | None:
     return content
 
 
+def get_cost_summary() -> str | None:
+    """Build a compact cost summary from today and this month."""
+    now = datetime.now(timezone.utc).astimezone()
+    day_start_ts = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    month_start_ts = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+    # Read flush costs
+    flush_state = {}
+    if FLUSH_STATE_FILE.exists():
+        try:
+            flush_state = json.loads(FLUSH_STATE_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    today_flushes = [
+        e for e in flush_state.get("flush_costs", [])
+        if e.get("timestamp", 0) >= day_start_ts
+    ]
+    month_flushes = [
+        e for e in flush_state.get("flush_costs", [])
+        if e.get("timestamp", 0) >= month_start_ts
+    ]
+
+    # Read compile/ingest costs
+    state = {}
+    if STATE_FILE.exists():
+        try:
+            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def parse_iso(ts: str) -> float:
+        try:
+            return datetime.fromisoformat(ts).timestamp()
+        except (ValueError, TypeError):
+            return 0.0
+
+    today_compile = sum(
+        e.get("cost_usd", 0.0)
+        for e in state.get("ingested_daily", {}).values()
+        if parse_iso(e.get("compiled_at", "")) >= day_start_ts
+    )
+    today_ingest = sum(
+        e.get("cost_usd", 0.0)
+        for e in state.get("ingested_sources", {}).values()
+        if parse_iso(e.get("ingested_at", "")) >= day_start_ts
+    )
+    today_flush_cost = sum(e.get("cost_usd", 0.0) for e in today_flushes)
+    today_total = today_flush_cost + today_compile + today_ingest
+
+    month_flush_cost = sum(e.get("cost_usd", 0.0) for e in month_flushes)
+    month_compile = sum(
+        e.get("cost_usd", 0.0)
+        for e in state.get("ingested_daily", {}).values()
+        if parse_iso(e.get("compiled_at", "")) >= month_start_ts
+    )
+    month_ingest = sum(
+        e.get("cost_usd", 0.0)
+        for e in state.get("ingested_sources", {}).values()
+        if parse_iso(e.get("ingested_at", "")) >= month_start_ts
+    )
+    month_total = month_flush_cost + month_compile + month_ingest
+
+    if today_total == 0 and month_total == 0:
+        return None
+
+    parts = []
+    if today_total > 0:
+        parts.append(
+            f"Today: Flushes {len(today_flushes)}x ${today_flush_cost:.2f}"
+            f" | Compile ${today_compile:.2f}"
+            f" | Ingest ${today_ingest:.2f}"
+            f" | **Total ${today_total:.2f}**"
+        )
+    if month_total > 0:
+        parts.append(f"This month: ${month_total:.2f}")
+
+    return "\n".join(parts)
+
+
 def build_context() -> str:
     """Assemble the context to inject into the conversation."""
     parts = []
@@ -92,6 +174,11 @@ def build_context() -> str:
     # Today's date
     today = datetime.now(timezone.utc).astimezone()
     parts.append(f"## Today\n{today.strftime('%A, %B %d, %Y')}")
+
+    # Cost summary — passive awareness of spending
+    cost_summary = get_cost_summary()
+    if cost_summary:
+        parts.append(f"## Cost Summary\n{cost_summary}")
 
     # Work In Progress — "resume here" state from the last session that
     # ended mid-task. Placed second so Claude sees it immediately after
