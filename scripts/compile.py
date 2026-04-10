@@ -28,6 +28,7 @@ from utils import (
     read_wiki_index,
     save_state,
 )
+from compile_truth import compile_truth as regenerate_truth, COMPILED_TRUTH_FILE
 
 
 # ── Paths for the LLM to use ──────────────────────────────────────────
@@ -51,6 +52,11 @@ async def compile_daily_log(log_path: Path, state: dict) -> float:
     schema = AGENTS_FILE.read_text(encoding="utf-8")
     wiki_index = read_wiki_index()
 
+    # Read compiled truth — dense summary of all current knowledge (zero-cost artifact)
+    compiled_truth = ""
+    if COMPILED_TRUTH_FILE.exists():
+        compiled_truth = COMPILED_TRUTH_FILE.read_text(encoding="utf-8")
+
     timestamp = now_iso()
 
     prompt = f"""You are a knowledge compiler. Your job is to read a daily conversation log
@@ -63,6 +69,10 @@ and extract knowledge into structured wiki articles.
 ## Current Wiki Index
 
 {wiki_index}
+
+## Current Knowledge (compiled truth)
+
+{compiled_truth if compiled_truth else "(No compiled truth yet — run compile_truth.py first)"}
 
 ## Daily Log to Compile
 
@@ -78,10 +88,14 @@ Read the daily log above and compile it into wiki articles following the schema 
 
 1. **Extract key concepts** - Identify 3-7 distinct concepts worth their own article
 2. **Create concept articles** in `knowledge/concepts/` - One .md file per concept
-   - Use the exact article format from AGENTS.md (YAML frontmatter + sections)
+   - Use the Truth + Timeline format from AGENTS.md:
+     * `## Truth` section: current facts only, no narrative or provenance
+     * `### Key Points` under Truth: 3-5 self-contained factual bullets
+     * `### Related Concepts` under Truth: [[wikilinks]] with one-line descriptions
+     * `---` horizontal rule separator
+     * `## Timeline` section: per-source entries documenting what was learned and when
    - Include `sources:` in frontmatter pointing to the daily log file
-   - Use `[[concepts/slug]]` wikilinks to link to related concepts
-   - Write in encyclopedia style - neutral, comprehensive
+   - Write Truth in encyclopedia style — dense, factual, no "we discovered"
 3. **Create connection articles** in `knowledge/connections/` if this log reveals non-obvious
    relationships between 2+ existing concepts
 4. **Update existing articles** if this log adds new information to concepts already in the wiki
@@ -207,6 +221,7 @@ def main():
         print(f"  Done.")
 
     articles = list_wiki_articles()
+    regenerate_truth()
     print(f"\nCompilation complete. Total cost: ${total_cost:.2f}")
     print(f"Knowledge base: {len(articles)} articles")
 
