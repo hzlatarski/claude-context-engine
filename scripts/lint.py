@@ -145,6 +145,74 @@ def check_sparse_articles() -> list[dict]:
     return issues
 
 
+def check_low_priority_articles() -> list[dict]:
+    """Check for articles that score below the inclusion threshold.
+
+    These are articles that won't make it into compiled-truth.md under the
+    default budget. Flags articles that are both old (>90 days) and never
+    accessed, as candidates for consolidation or archiving.
+    """
+    from compile_truth import (
+        DEFAULT_BUDGET_CHARS,
+        ScoredArticle,
+        build_inbound_link_map,
+        extract_fallback_truth,
+        extract_truth_section,
+        parse_frontmatter,
+        score_recency,
+        score_linkedness,
+        score_access,
+        compute_score,
+    )
+    from datetime import date
+
+    today = date.today()
+    state = load_state()
+    access_counts = state.get("access_counts", {})
+    inbound_map = build_inbound_link_map()
+
+    issues = []
+    for article in list_wiki_articles():
+        content = article.read_text(encoding="utf-8")
+        rel = article.relative_to(KNOWLEDGE_DIR)
+        slug = str(rel).replace(".md", "").replace("\\", "/")
+
+        fm = parse_frontmatter(content)
+        if fm.get("pinned"):
+            continue  # pinned articles are always included
+
+        updated = fm.get("updated") or fm.get("created")
+        acc_count = access_counts.get(slug, 0)
+
+        # Check age
+        days_old = 0
+        if updated:
+            try:
+                days_old = (today - date.fromisoformat(updated)).days
+            except ValueError:
+                pass
+
+        if days_old > 90 and acc_count == 0:
+            inbound = inbound_map.get(slug, 0)
+            score = compute_score(
+                score_recency(updated, today),
+                score_linkedness(inbound),
+                score_access(acc_count),
+            )
+            issues.append({
+                "severity": "suggestion",
+                "check": "low_priority_article",
+                "file": str(rel),
+                "detail": (
+                    f"Low priority: {days_old} days old, never accessed, "
+                    f"{inbound} inbound links, score={score:.3f} — "
+                    f"candidate for consolidation or archiving"
+                ),
+            })
+
+    return issues
+
+
 def check_orphan_source_files() -> list[dict]:
     """Check for source files declared in sources.yaml that haven't been ingested."""
     from utils import load_sources_config, resolve_source_files
@@ -290,6 +358,7 @@ def main():
         ("Stale articles", check_stale_articles),
         ("Missing backlinks", check_missing_backlinks),
         ("Sparse articles", check_sparse_articles),
+        ("Low priority articles", check_low_priority_articles),
     ]
 
     for name, check_fn in checks:

@@ -25,7 +25,14 @@ def load_state() -> dict:
     """Load persistent state from state.json."""
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {"ingested": {}, "query_count": 0, "last_lint": None, "total_cost": 0.0}
+    return {
+        "ingested_daily": {},
+        "ingested_sources": {},
+        "access_counts": {},
+        "query_count": 0,
+        "last_lint": None,
+        "total_cost": 0.0,
+    }
 
 
 def save_state(state: dict) -> None:

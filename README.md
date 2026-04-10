@@ -16,6 +16,7 @@ Forked from [coleam00/claude-memory-compiler](https://github.com/coleam00/claude
 | **Drop zone** | None | `sources/articles/`, `sources/notes/`, `sources/pdfs/` |
 | **Compiled Truth** | None | Zero-cost `compiled-truth.md` — all facts in one file, included in every prompt |
 | **Truth + Timeline format** | Single-zone articles | Articles split into Truth (facts) and Timeline (provenance) |
+| **Priority-scored truth** | None | Compiled truth uses recency, cross-linking, and access frequency to select top articles within a character budget |
 | **O(1) prompt cost** | O(n) — all articles dumped into prompt | Index + compiled truth — fixed cost regardless of KB size |
 | **Knowledge location** | Inside `.claude/` | Project root (`knowledge/`) -- Claude Code blocks writes inside `.claude/` |
 | **Exclude patterns** | Broken for external paths | Fixed (`fnmatch` against filenames) |
@@ -144,7 +145,7 @@ Source files -> sources.yaml -> ingest.py -> knowledge/concepts/, connections/
 - **compile.py** turns daily logs into organized concept articles with cross-references
 - **ingest.py** turns source files (specs, docs, memories, articles) into the same knowledge base
 - **query.py** answers questions using index-guided retrieval (no RAG needed at personal scale)
-- **lint.py** runs 8 health checks (broken links, orphans, contradictions, staleness, uningested sources)
+- **lint.py** runs 9 health checks (broken links, orphans, contradictions, staleness, uningested sources, low-priority articles)
 
 ## Key Commands
 
@@ -168,7 +169,10 @@ uv run python scripts/lint.py                       # all checks
 uv run python scripts/lint.py --structural-only     # free structural checks only
 
 # Generate compiled truth (zero cost, pure Python)
-uv run python scripts/compile_truth.py              # regenerate compiled-truth.md
+uv run python scripts/compile_truth.py              # regenerate with priority scoring
+uv run python scripts/compile_truth.py --verbose    # show scoring breakdown
+uv run python scripts/compile_truth.py --budget 60000  # custom char budget
+uv run python scripts/compile_truth.py --all        # include everything (ignore budget)
 ```
 
 ## Configuration: sources.yaml
@@ -273,11 +277,33 @@ Cost per operation is approximately constant regardless of knowledge base size.
 
 ## Compiled Truth
 
-Instead of dumping all articles into every prompt (expensive, O(n)) or using embeddings/RAG (complex), this fork generates a zero-cost **compiled truth** file.
+Instead of dumping all articles into every prompt (expensive, O(n)) or using embeddings/RAG (complex), this fork generates a zero-cost **compiled truth** file with priority-scored article selection.
 
-`compile_truth.py` reads every wiki article, extracts just the factual Truth section (~150 words per article), and concatenates them into `knowledge/compiled-truth.md`. This file is included in every compile/ingest prompt and injected into every session via the start hook.
+### Three-Level Retrieval
 
-The result: the LLM sees **all current knowledge** in a compact format. At 71 articles that's ~24K words. At 500 articles, ~75K words — still within context limits. No vector database, no embeddings, no ongoing API cost.
+| Level | What | Size | Cost |
+|-------|------|------|------|
+| **Level 0: Map** | `index.md` — article slug + one-line description | ~8K chars | Always injected |
+| **Level 1: Essential Truth** | `compiled-truth.md` — top articles by priority score | ~40K chars (configurable) | Always injected |
+| **Level 2: Full Articles** | Individual articles via `query.py` or direct Read | On-demand | Per-query |
+
+### Priority Scoring
+
+`compile_truth.py` scores every article and fills a character budget (default 40K) from the highest-scored down. Pinned articles (with `pinned: true` in frontmatter) are always included first.
+
+**Scoring formula** (non-pinned articles):
+
+| Signal | Weight | What it measures |
+|--------|--------|-----------------|
+| **Recency** | 40% | Exponential decay from `updated` date — today = 1.0, 30 days = 0.40, 90 days = 0.18 |
+| **Linkedness** | 35% | Log-scaled count of inbound `[[wikilinks]]` — more cross-linked = more foundational |
+| **Access frequency** | 25% | Log-scaled count of `query.py` citations — frequently consulted = more useful |
+
+The result: the most important, most connected, most recently updated articles are always in context. At 75 articles, the top 14 fit within 40K chars. As the KB grows to 500+, the same budget automatically selects the best subset — no manual curation needed.
+
+Run `compile_truth.py --verbose` to see the full scoring breakdown for every article.
+
+### Article Format
 
 Articles use a **Truth + Timeline** format:
 - **Truth** (top): current facts, dense, machine-extractable

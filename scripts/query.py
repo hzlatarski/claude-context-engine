@@ -106,6 +106,19 @@ consulting the knowledge base below.
     state = load_state()
     state["query_count"] = state.get("query_count", 0) + 1
     state["total_cost"] = state.get("total_cost", 0.0) + cost
+
+    # Increment access counts for articles that were likely consulted.
+    # We detect this by scanning the answer for [[wikilinks]] — if the LLM
+    # cited an article, it was accessed. This is a lightweight heuristic
+    # that avoids intercepting individual tool calls.
+    access_counts = state.setdefault("access_counts", {})
+    from utils import extract_wikilinks
+    cited = set(extract_wikilinks(answer))
+    for slug in cited:
+        if slug.startswith("daily/"):
+            continue
+        access_counts[slug] = access_counts.get(slug, 0) + 1
+
     save_state(state)
 
     return answer
