@@ -120,7 +120,8 @@ Format:
 
 ### Concept Articles (`knowledge/concepts/`)
 
-One article per atomic piece of knowledge. These are facts, patterns, decisions, preferences, and lessons extracted from your conversations.
+One article per atomic piece of knowledge. Articles are split into two zones:
+**Truth** (current facts, compact, machine-extractable) and **Timeline** (provenance, verbose).
 
 ```markdown
 ---
@@ -134,27 +135,38 @@ created: 2026-04-01
 updated: 2026-04-03
 ---
 
-# Concept Name
+## Truth
 
-[2-4 sentence core explanation]
+[2-4 sentence core explanation — what this IS, stated as current fact.
+No "we discovered" or "during session X". Just what's true now.]
 
-## Key Points
+### Key Points
 
-- [Bullet points, each self-contained]
+- [Self-contained factual bullet points]
 
-## Details
+### Related Concepts
 
-[Deeper explanation, encyclopedia-style paragraphs]
+- [[concepts/related-concept]] — how it connects (one line)
 
-## Related Concepts
+---
 
-- [[concepts/related-concept]] - How it connects
+## Timeline
 
-## Sources
+### 2026-04-01 | daily/2026-04-01.md
+- Initial discovery during project setup
+- Decided to use X approach because Y
 
-- [[daily/2026-04-01.md]] - Initial discovery during project setup
-- [[daily/2026-04-03.md]] - Updated after debugging session
+### 2026-04-03 | daily/2026-04-03.md
+- Updated after debugging session revealed Z
+- Changed approach from A to B (rationale: performance)
 ```
+
+**Truth zone** (everything above `---`): machine-extracted by `compile_truth.py` into
+`compiled-truth.md`. Write for density — every word should be a fact. No narrative,
+no provenance, no "we learned that." Just what's true now.
+
+**Timeline zone** (everything below `---`): per-source entries documenting what was
+learned, when, and why. Preserves provenance without cluttering the truth.
 
 ### Connection Articles (`knowledge/connections/`)
 
@@ -172,24 +184,26 @@ created: 2026-04-04
 updated: 2026-04-04
 ---
 
-# Connection: X and Y
+## Truth
 
-## The Connection
+[What links these concepts — the non-obvious relationship]
 
-[What links these concepts]
+### Key Insight
 
-## Key Insight
+- [The core insight, stated as fact]
 
-[The non-obvious relationship discovered]
-
-## Evidence
-
-[Specific examples from conversations]
-
-## Related Concepts
+### Related Concepts
 
 - [[concepts/concept-x]]
 - [[concepts/concept-y]]
+
+---
+
+## Timeline
+
+### 2026-04-04 | daily/2026-04-04.md
+- Discovered during session when X and Y surfaced together
+- Specific evidence: [examples]
 ```
 
 ### Q&A Articles (`knowledge/qa/`)
@@ -299,12 +313,14 @@ llm-personal-kb/
 |-- daily/                           # "Source code" - conversation logs (immutable)
 |-- knowledge/                       # "Executable" - compiled knowledge (LLM-owned)
 |   |-- index.md                     #   Master catalog - THE retrieval mechanism
+|   |-- compiled-truth.md            #   Concatenated Truth sections (auto-generated, zero cost)
 |   |-- log.md                       #   Append-only build log
 |   |-- concepts/                    #   Atomic knowledge articles
 |   |-- connections/                 #   Cross-cutting insights linking 2+ concepts
 |   |-- qa/                          #   Filed query answers (compounding knowledge)
 |-- scripts/                         # CLI tools
 |   |-- compile.py                   #   Compile daily logs -> knowledge articles
+|   |-- compile_truth.py             #   Generate compiled-truth.md (zero-cost post-processing)
 |   |-- query.py                     #   Ask questions (index-guided, no RAG)
 |   |-- lint.py                      #   7 health checks
 |   |-- flush.py                     #   Extract memories from conversations (background)
@@ -412,11 +428,12 @@ async for message in query(
 ):
 ```
 
-- Builds a prompt with: AGENTS.md schema, current index, all existing articles, and the daily log
+- Builds a prompt with: AGENTS.md schema, current index, compiled truth (all articles' facts), and the daily log
+- After compilation, runs compile_truth.py to regenerate compiled-truth.md (zero cost)
 - Claude reads the daily log, decides what concepts to extract, and writes files directly
 - `permission_mode="acceptEdits"` auto-approves all file operations
 - Incremental: tracks SHA-256 hashes of daily logs in `state.json`, skips unchanged files
-- Cost: ~$0.45-0.65 per daily log (increases as KB grows)
+- Cost: ~$0.30-0.80 per daily log (stable — does not increase as KB grows)
 
 **CLI:**
 ```bash
